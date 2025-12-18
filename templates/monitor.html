@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>실시간 환경 모니터링 대시보드</title>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <style>
+        body { font-family: 'Arial', sans-serif; background-color: #f4f7f6; margin: 0; padding: 20px; }
+        .header { text-align: center; color: #2c3e50; margin-bottom: 20px; }
+        /* 임계값 표시 업데이트 */
+        .threshold-info { text-align: center; color: #555; margin-bottom: 30px; line-height: 1.5; font-size: 1.1em; }
+        .card-container { display: flex; justify-content: space-around; flex-wrap: wrap; margin-bottom: 30px; }
+        .card {
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            margin: 10px;
+            width: 30%;
+            min-width: 200px;
+            text-align: center;
+        }
+        .card h3 { color: #34495e; margin-top: 0; }
+        .card .value { font-size: 2.5em; font-weight: bold; margin: 10px 0; }
+        .card .description { color: #7f8c8d; }
+        .status-card { background-color: #ecf0f1; }
+        
+        /* 상태별 색상 클래스 */
+        .alert-high { color: #e74c3c; } /* 고온, 고습 */
+        .alert-low { color: #3498db; }  /* 저온 */
+        .alert-normal { color: #2ecc71; } /* 정상 */
+
+        /* 수동 입력 기록 스타일 */
+        .manual-records-section h2 { color: #2c3e50; border-bottom: 2px solid #ddd; padding-bottom: 10px; margin-top: 30px; font-size: 1.4em;}
+        .record-item {
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            font-size: 0.95em;
+        }
+        /* 경고 기록의 배경색 */
+        .record-alert { 
+            background-color: #f8d7da; 
+            border: 1px solid #f5c6cb; 
+            color: #721c24; 
+        }
+        /* 정상 기록의 배경색 */
+        .record-normal { 
+            background-color: #d4edda; 
+            border: 1px solid #c3e6cb; 
+            color: #155724; 
+        }
+        .record-item strong { margin-right: 5px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <h1 class="header">🏭 실시간 환경 모니터링 대시보드</h1>
+    
+    <div class="threshold-info">
+        <p>
+            **온도 기준:** {{ LOW_TEMP_THRESHOLD }}°C 미만 (저온) | 
+            {{ HIGH_TEMP_THRESHOLD }}°C 이상 (고온)
+        </p>
+        <p>
+            **습도 기준:** {{ HIGH_HUM_THRESHOLD }}% 이상 (고습)
+        </p>
+    </div>
+
+    <div style="text-align: center; margin-bottom: 30px;">
+        <a href="{{ url_for('add_data_form') }}" style="display: inline-block; padding: 12px 25px; background-color: #f39c12; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            수동으로 데이터 입력하기
+        </a>
+    </div>
+
+    <div class="card-container">
+        <div class="card">
+            <h3>현재 온도 (°C)</h3>
+            <div id="temp-value" class="value">--</div>
+            <p class="description">실시간 센서 데이터</p>
+        </div>
+
+        <div class="card">
+            <h3>현재 습도 (%)</h3>
+            <div id="hum-value" class="value">--</div>
+            <p class="description">실시간 센서 데이터</p>
+        </div>
+
+        <div class="card status-card">
+            <h3>시스템 상태</h3>
+            <div id="status-value" class="value">--</div>
+            <p id="status-description" class="description">--</p>
+        </div>
+    </div>
+    
+    <div class="manual-records-section">
+        <h2>📍 수동 입력 기록 (최신순)</h2>
+        {% if manual_records %}
+            {% for record in manual_records %}
+            {% set alert_class = 'record-alert' if '경고' in record.alert_status else 'record-normal' %}
+            <div class="record-item {{ alert_class }}">
+                <strong>시간:</strong> {{ record.timestamp }} | 
+                <strong>장소:</strong> {{ record.location }} | 
+                <strong>온도:</strong> {{ record.temperature }}°C | 
+                <strong>습도:</strong> {{ record.humidity }}% | 
+                <span style="font-weight: bold;">
+                    상태: {{ record.alert_status }}
+                </span>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p>아직 수동으로 입력된 기록이 없습니다.</p>
+        {% endif %}
+    </div>
+
+    <script>
+        // AJAX를 이용해 1초마다 실시간 데이터 업데이트
+        function update_data() {
+            $.getJSON("{{ url_for('get_data') }}", function(data) {
+                // 1. 값 업데이트
+                $("#temp-value").text(data.temperature.toFixed(2));
+                $("#hum-value").text(data.humidity.toFixed(2));
+                $("#status-value").text(data.status);
+                $("#status-description").text(data.status === '정상 범위' ? '모든 환경 요소 정상' : '주의 요망');
+
+                // 2. 색상 및 스타일 업데이트
+                $("#status-value").removeClass("alert-high alert-low alert-normal");
+                // 상태 문자열에 특정 경고 포함 여부에 따라 색상 지정
+                if (data.status.includes("고온") || data.status.includes("고습")) {
+                    $("#status-value").addClass("alert-high");
+                } else if (data.status.includes("저온")) {
+                    $("#status-value").addClass("alert-low");
+                } else {
+                    $("#status-value").addClass("alert-normal");
+                }
+                
+                // 온도/습도 값에 따른 개별 카드 색상 업데이트
+                var temp = data.temperature;
+                $("#temp-value").removeClass("alert-high alert-low alert-normal");
+                if (temp >= {{ HIGH_TEMP_THRESHOLD }}) {
+                    $("#temp-value").addClass("alert-high");
+                } else if (temp < {{ LOW_TEMP_THRESHOLD }}) {
+                    $("#temp-value").addClass("alert-low");
+                } else {
+                    $("#temp-value").addClass("alert-normal");
+                }
+
+                var hum = data.humidity;
+                $("#hum-value").removeClass("alert-high alert-normal");
+                if (hum >= {{ HIGH_HUM_THRESHOLD }}) {
+                    $("#hum-value").addClass("alert-high");
+                } else {
+                    $("#hum-value").addClass("alert-normal");
+                }
+
+            }).fail(function(jqXHR, textStatus, errorThrown) {
+                 console.error("데이터 로드 오류: " + textStatus + ", " + errorThrown);
+                 $("#status-value").text("에러");
+                 $("#status-description").text("데이터 로드에 실패했습니다.");
+            });
+        }
+
+        // 페이지 로드 시 실행 및 1초마다 반복
+        $(document).ready(function() {
+            update_data();
+            setInterval(update_data, 1000); 
+        });
+    </script>
+</body>
+</html>
